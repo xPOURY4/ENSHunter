@@ -1,0 +1,42 @@
+# Compiled binaries
+/enshunter
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Dependency directories
+/vendor/
+
+# Environment variables
+.env
+
+# Output files
+ens_available.txt
+
+# Config files
+config.json
+
+# Go workspace file
+go.work
+
+# IDE specific files
+.idea/
+.vscode/
+*.code-workspace
+
+# macOS specific files
+.DS_Store
+
+# Windows specific files
+Thumbs.db
+
+# Log files
+*.log
