@@ -67,12 +67,6 @@ func (rc *RegistrarController) Available(opts *bind.CallOpts, name string) (bool
 	return out[0].(bool), nil
 }
 
-type Result struct {
-	Domain     string
-	IsAvailable bool
-	Error      error
-}
-
 type Config struct {
 	InfuraKey string `json:"infura_key"`
 	Workers   int    `json:"workers"`
@@ -89,7 +83,6 @@ func loadConfig() Config {
 		Timeout:   30,
 	}
 
-	// Try to load from config file in user's home directory
 	configDir := getConfigDir()
 	configFile := filepath.Join(configDir, "config.json")
 
@@ -100,7 +93,6 @@ func loadConfig() Config {
 		}
 	}
 
-	// Try to load from .env file in current directory
 	if err := godotenv.Load(); err == nil {
 		if key := os.Getenv("INFURA_KEY"); key != "" {
 			config.InfuraKey = key
@@ -125,7 +117,6 @@ func loadConfig() Config {
 func saveConfig(config Config) error {
 	configDir := getConfigDir()
 	
-	// Create config directory if it doesn't exist
 	if _, err := os.Stat(configDir); os.IsNotExist(err) {
 		if err := os.MkdirAll(configDir, 0755); err != nil {
 			return err
@@ -149,9 +140,20 @@ func getConfigDir() string {
 	return filepath.Join(usr.HomeDir, ".enshunter")
 }
 
+type Result struct {
+	Domain     string
+	IsAvailable bool
+	Error      error
+}
+
 func main() {
 	// Load configuration from files
 	config := loadConfig()
+	
+	// Create styled output with the fatih/color package
+	successMsg := color.New(color.FgGreen, color.Bold).SprintFunc()
+	errorMsg := color.New(color.FgRed, color.Bold).SprintFunc()
+	infoMsg := color.New(color.FgCyan).SprintFunc()
 	
 	// Command line flags
 	infuraKey := flag.String("infura", config.InfuraKey, "Infura Project ID")
@@ -176,42 +178,50 @@ func main() {
 		}
 		
 		if err := saveConfig(config); err != nil {
-			log.Printf("Warning: Failed to save configuration: %v", err)
+			log.Printf(errorMsg("Warning: Failed to save configuration: %v"), err)
 		} else {
-			log.Println("Configuration saved successfully!")
+			log.Println(successMsg("Configuration saved successfully!"))
 		}
 	}
 
 	if *infuraKey == "" {
-		log.Fatal("Infura Project ID is required. Use -infura flag or set INFURA_KEY in .env file or config.json")
+		log.Fatal(errorMsg("Infura Project ID is required. Use -infura flag or set INFURA_KEY in .env file or config.json"))
 	}
 
 	ethereumNode := fmt.Sprintf("https://mainnet.infura.io/v3/%s", *infuraKey)
 	verbose := *verboseFlag
 	
+	if verbose {
+		log.Println(infoMsg("Connecting to Ethereum network..."))
+	}
+	
 	client, err := ethclient.Dial(ethereumNode)
 	if err != nil {
-		log.Fatalf("Failed to connect to Ethereum: %v", err)
+		log.Fatalf(errorMsg("Failed to connect to Ethereum: %v"), err)
+	}
+
+	if verbose {
+		log.Println(successMsg("Successfully connected to Ethereum"))
 	}
 
 	registrarAddress := common.HexToAddress("0x283Af0B28c62C092C9727F1Ee09c02CA627EB7F5")
 	controller, err := NewRegistrarController(registrarAddress, client)
 	if err != nil {
-		log.Fatalf("Failed to create controller: %v", err)
+		log.Fatalf(errorMsg("Failed to create controller: %v"), err)
 	}
 
 	domains, err := loadDomains(*inputFile)
 	if err != nil {
-		log.Fatalf("Failed to load domains: %v", err)
+		log.Fatalf(errorMsg("Failed to load domains: %v"), err)
 	}
 
 	if len(domains) == 0 {
-		log.Fatal("No domains found in input file")
+		log.Fatal(errorMsg("No domains found in input file"))
 	}
 
 	outFile, err := os.Create(*outputFile)
 	if err != nil {
-		log.Fatalf("Failed to create output file: %v", err)
+		log.Fatalf(errorMsg("Failed to create output file: %v"), err)
 	}
 	defer outFile.Close()
 	
@@ -222,7 +232,7 @@ func main() {
 	var (
 		wg sync.WaitGroup
 		available int32
-		errors int32
+		errorCount int32
 	)
 
 	jobs := make(chan string, len(domains))
@@ -231,6 +241,7 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(*timeout)*time.Second)
 	defer cancel()
 
+	fmt.Printf(infoMsg("Starting ENSHunter - checking %d domains\n"), len(domains))
 	bar := progressbar.Default(int64(len(domains)))
 
 	for w := 0; w < *workers; w++ {
@@ -245,7 +256,7 @@ func main() {
 				
 				for attempt := 0; attempt <= *retries; attempt++ {
 					if attempt > 0 && verbose {
-						log.Printf("Retry %d for domain %s", attempt, domain)
+						log.Printf(infoMsg("Retry %d for domain %s"), attempt, domain)
 					}
 					
 					isAvailable, err = controller.Available(&bind.CallOpts{Context: ctx}, processedDomain)
@@ -282,22 +293,22 @@ func main() {
 		
 		if result.Error != nil {
 			if verbose {
-				log.Printf("Error checking %s: %v", result.Domain, result.Error)
+				log.Printf(errorMsg("Error checking %s: %v"), result.Domain, result.Error)
 			}
-			atomic.AddInt32(&errors, 1)
+			atomic.AddInt32(&errorCount, 1)
 			continue
 		}
 
 		if result.IsAvailable {
 			atomic.AddInt32(&available, 1)
 			if verbose {
-				log.Printf("Domain %s is available", result.Domain)
+				log.Printf(successMsg("Domain %s is available"), result.Domain)
 			}
 			
 			outputLock.Lock()
 			_, err := writer.WriteString(result.Domain + "\n")
 			if err != nil && verbose {
-				log.Printf("Error writing to file: %v", err)
+				log.Printf(errorMsg("Error writing to file: %v"), err)
 			}
 			writer.Flush()
 			outputLock.Unlock()
@@ -306,11 +317,11 @@ func main() {
 		}
 	}
 
-	fmt.Printf("\nSummary:\n")
-	fmt.Printf("Total domains checked: %d\n", len(domains))
-	fmt.Printf("Available domains: %d\n", available)
-	fmt.Printf("Errors: %d\n", errors)
-	fmt.Printf("Available domains saved to: %s\n", *outputFile)
+	fmt.Printf("\n%s\n", successMsg("Scan completed!"))
+	fmt.Printf("Total domains checked: %s\n", infoMsg("%d", len(domains)))
+	fmt.Printf("Available domains: %s\n", successMsg("%d", available))
+	fmt.Printf("Errors: %s\n", errorCount > 0 ? errorMsg("%d", errorCount) : successMsg("%d", errorCount))
+	fmt.Printf("Available domains saved to: %s\n", infoMsg(*outputFile))
 }
 
 func loadDomains(filePath string) ([]string, error) {
