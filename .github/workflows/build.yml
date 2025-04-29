@@ -21,8 +21,19 @@ jobs:
       with:
         go-version: ${{ matrix.go-version }}
     
-    - name: Install dependencies
-      run: go get .
+    - name: Clean Go module cache
+      run: go clean -modcache
+    
+    - name: Update dependencies securely
+      run: |
+        # Remove go.sum and verify modules directly
+        rm -f go.sum
+        # Use direct proxy connection to avoid caching issues
+        GOPROXY=direct go mod download -x
+        # Regenerate go.sum file
+        GOPROXY=direct go mod tidy -v
+      env:
+        GOSUMDB: "sum.golang.org"
     
     - name: Build
       run: go build -v ./...
