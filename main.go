@@ -16,6 +16,7 @@ import (
 	"time"
 	"sync/atomic"
 
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -51,10 +52,11 @@ type RegistrarController struct {
 }
 
 func NewRegistrarController(address common.Address, backend bind.ContractBackend) (*RegistrarController, error) {
-	contract, err := bind.NewBoundContract(address, bind.FixedABIJSON([]byte(SimpleRegistrarControllerABI)), backend, backend, backend)
+	abi, err := abi.JSON(strings.NewReader(SimpleRegistrarControllerABI))
 	if err != nil {
 		return nil, err
 	}
+	contract := bind.NewBoundContract(address, abi, backend, backend, backend)
 	return &RegistrarController{contract}, nil
 }
 
@@ -151,9 +153,12 @@ func main() {
 	config := loadConfig()
 	
 	// Create styled output with the fatih/color package
-	successMsg := color.New(color.FgGreen, color.Bold).SprintFunc()
-	errorMsg := color.New(color.FgRed, color.Bold).SprintFunc()
-	infoMsg := color.New(color.FgCyan).SprintFunc()
+	successColor := color.New(color.FgGreen, color.Bold)
+	errorColor := color.New(color.FgRed, color.Bold)
+	infoColor := color.New(color.FgCyan)
+	
+	// Use the color objects directly to avoid "imported and not used" error
+	successColor.Println("ENSHunter initialized")
 	
 	// Command line flags
 	infuraKey := flag.String("infura", config.InfuraKey, "Infura Project ID")
@@ -178,30 +183,30 @@ func main() {
 		}
 		
 		if err := saveConfig(config); err != nil {
-			log.Printf(errorMsg("Warning: Failed to save configuration: %v"), err)
+			log.Printf(errorColor.Sprintf("Warning: Failed to save configuration: %v", err))
 		} else {
-			log.Println(successMsg("Configuration saved successfully!"))
+			log.Println(successColor.Sprintf("Configuration saved successfully!"))
 		}
 	}
 
 	if *infuraKey == "" {
-		log.Fatal(errorMsg("Infura Project ID is required. Use -infura flag or set INFURA_KEY in .env file or config.json"))
+		log.Fatal(errorColor.Sprintf("Infura Project ID is required. Use -infura flag or set INFURA_KEY in .env file or config.json"))
 	}
 
 	ethereumNode := fmt.Sprintf("https://mainnet.infura.io/v3/%s", *infuraKey)
 	verbose := *verboseFlag
 	
 	if verbose {
-		log.Println(infoMsg("Connecting to Ethereum network..."))
+		log.Println(infoColor.Sprintf("Connecting to Ethereum network..."))
 	}
 	
 	client, err := ethclient.Dial(ethereumNode)
 	if err != nil {
-		log.Fatalf(errorMsg("Failed to connect to Ethereum: %v"), err)
+		log.Fatalf(errorColor.Sprintf("Failed to connect to Ethereum: %v", err))
 	}
 
 	if verbose {
-		log.Println(successMsg("Successfully connected to Ethereum"))
+		log.Println(successColor.Sprintf("Successfully connected to Ethereum"))
 	}
 
 	registrarAddress := common.HexToAddress("0x283Af0B28c62C092C9727F1Ee09c02CA627EB7F5")
@@ -241,7 +246,7 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(*timeout)*time.Second)
 	defer cancel()
 
-	fmt.Printf(infoMsg("Starting ENSHunter - checking %d domains\n"), len(domains))
+	fmt.Printf(infoColor.Sprintf("Starting ENSHunter - checking %d domains\n"), len(domains))
 	bar := progressbar.Default(int64(len(domains)))
 
 	for w := 0; w < *workers; w++ {
@@ -256,7 +261,7 @@ func main() {
 				
 				for attempt := 0; attempt <= *retries; attempt++ {
 					if attempt > 0 && verbose {
-						log.Printf(infoMsg("Retry %d for domain %s"), attempt, domain)
+						log.Printf(infoColor.Sprintf("Retry %d for domain %s"), attempt, domain)
 					}
 					
 					isAvailable, err = controller.Available(&bind.CallOpts{Context: ctx}, processedDomain)
@@ -293,7 +298,7 @@ func main() {
 		
 		if result.Error != nil {
 			if verbose {
-				log.Printf(errorMsg("Error checking %s: %v"), result.Domain, result.Error)
+				log.Printf(errorColor.Sprintf("Error checking %s: %v"), result.Domain, result.Error)
 			}
 			atomic.AddInt32(&errorCount, 1)
 			continue
@@ -302,13 +307,13 @@ func main() {
 		if result.IsAvailable {
 			atomic.AddInt32(&available, 1)
 			if verbose {
-				log.Printf(successMsg("Domain %s is available"), result.Domain)
+				log.Printf(successColor.Sprintf("Domain %s is available"), result.Domain)
 			}
 			
 			outputLock.Lock()
 			_, err := writer.WriteString(result.Domain + "\n")
 			if err != nil && verbose {
-				log.Printf(errorMsg("Error writing to file: %v"), err)
+				log.Printf(errorColor.Sprintf("Error writing to file: %v"), err)
 			}
 			writer.Flush()
 			outputLock.Unlock()
@@ -317,11 +322,11 @@ func main() {
 		}
 	}
 
-	fmt.Printf("\n%s\n", successMsg("Scan completed!"))
-	fmt.Printf("Total domains checked: %s\n", infoMsg("%d", len(domains)))
-	fmt.Printf("Available domains: %s\n", successMsg("%d", available))
-	fmt.Printf("Errors: %s\n", errorCount > 0 ? errorMsg("%d", errorCount) : successMsg("%d", errorCount))
-	fmt.Printf("Available domains saved to: %s\n", infoMsg(*outputFile))
+	fmt.Printf("\n%s\n", successColor.Sprintf("Scan completed!"))
+	fmt.Printf("Total domains checked: %s\n", infoColor.Sprintf("%d", len(domains)))
+	fmt.Printf("Available domains: %s\n", successColor.Sprintf("%d", available))
+	fmt.Printf("Errors: %s\n", errorCount > 0 ? errorColor.Sprintf("%d", errorCount) : successColor.Sprintf("%d", errorCount))
+	fmt.Printf("Available domains saved to: %s\n", infoColor.Sprintf(*outputFile))
 }
 
 func loadDomains(filePath string) ([]string, error) {
